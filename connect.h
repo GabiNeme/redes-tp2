@@ -7,9 +7,6 @@ int init_server_sockaddr(int iPversion, const char *portstr, struct sockaddr_sto
 
 int init_server(char *port, struct sockaddr_storage *saddr_storage);
 
-
 int addr_parse(const char *addrstr, const char *portstr, struct sockaddr_storage *storage);
 
-int init_client(char *addr_str, char *port_str, struct sockaddr_storage *addr_storage);
-
-void addrtostr(const struct sockaddr *addr, char *str, size_t strsize);
+void addrtostr(const struct sockaddr *addr);

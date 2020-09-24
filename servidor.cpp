@@ -1,175 +1,226 @@
-#include "server_connect.h"
+#include "connect.h"
 #include "data.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <stdbool.h>
-#include <inttypes.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>
-#include <sys/types.h>
+#include <pthread.h>
+#include <vector>
+#include <cstring>
+#include <fstream>
 
 #define BUFSZ 100
 
+
+Data hosts_data;
+std::vector<sockaddr_storage> dns_servers;
+char log_answer;
+std::string answer;
+
+struct request_thread_data{
+    int serverSocket;
+    struct sockaddr_storage cliaddr;
+    std::string hostname;
+};
+
+std::string request_other_servers(int serverSocket,std::string hostname);
+void * answer_request(void * request_data);
+void * listen_to_msgs(void * serverSocket);
+void save_dns_server(std::string cmd_line);
+void read_input_file(std::string filename);
+
+/*
+    Servidor DNS
+*/
+
 int main(int argc, char **argv) {
 
-    Data hosts_data;
-
+    //Verifica argumentos
     if (argc != 2 && argc !=3) {
         printf("Para iniciar o servidor DNS digite como argumento a " 
             "porta de conexão e, opcionalmente, arquivo com hostnames e ips: \n");
         printf("%s  <porta> [startup] \n", argv[0]);
         exit(EXIT_FAILURE);
+    }else if (argc == 3){ //foi informado um arquivo contendo comandos
+        read_input_file(argv[2]);
     }
 
     //cria socket
     struct sockaddr_storage addr_storage;
     int serverSocket = init_server(argv[1], &addr_storage);
     struct sockaddr *addr = (struct sockaddr *)(&addr_storage);
+    addrtostr(addr);
 
     //adiciona ao socket o endereço local
     if (bind(serverSocket, addr, sizeof(addr_storage)) != 0) {
         logError("Failed to bind.");
     }
 
+    //cria thread responsável por receber mensagens de outros servidores
+    pthread_t tid;
+    pthread_create(&tid, NULL, listen_to_msgs, &serverSocket);
 
+
+    //lê linha de comandos
     while(1){
         printf("> ");
         std::string cmd_line;
 
         getline(std::cin, cmd_line);
 
-        if(cmd_line.rfind("add ",0) == 0){
+        if(cmd_line.rfind("add ",0) == 0){              //comando add
             hosts_data.add(cmd_line);
-        }else if(cmd_line.rfind("search ",0) == 0){
-            int resp;
-            resp = hosts_data.search(cmd_line);
 
-            if (resp == 0){ //requisição correta, pedir aos outros servidores DNS
+        }else if(cmd_line.rfind("search ",0) == 0){     //comando search
+            //verifica se possui esse hostname salvo
+            std::string resp = hosts_data.search(cmd_line);
 
+            if (resp != ""){ //não conhece hostname informado, então pede aos outros servidores DNS
+                resp = request_other_servers(serverSocket, resp);
+                if (resp == "-1"){
+                    std::cout << "Resposta não encontrada." << std::endl;
+                }else{
+                    std::cout << resp << std::endl;
+                }
             }
+        }else if(cmd_line.rfind("link ",0) == 0){       //comando link
+            save_dns_server(cmd_line);
         
-        }else if(cmd_line.rfind("link ",0) == 0){
-
-        }else{
+        }else{                                          //comando errado
             std::cout << "Comando não identificado. As opções disponíveis são:" << std::endl;
             std::cout << "\tadd <hostname> <ip>" << std::endl;
             std::cout << "\tsearch <hostname>" << std::endl;
             std::cout << "\tlink <ip> <porta>" << std::endl;
         }
-
-
-
     }
-
-
-    if (strcmp(argv[1], "5111") == 0){
-        char hello[BUFSZ] = "Hello from server"; 
-
-
-        struct sockaddr_storage oserver_addr_st;
-
-        addr_parse("0.0.0.0", "5112", &oserver_addr_st);
-
-        sendto(serverSocket,(const char *)hello, strlen(hello), 
-            MSG_CONFIRM, (const struct sockaddr *) &oserver_addr_st, 
-                sizeof(oserver_addr_st)); 
-
-
-        printf("msg sent\n");
-    }
-
-
-    if (strcmp(argv[1], "5112") == 0){
-        struct sockaddr_storage cliaddr; 
-
-        memset(&cliaddr, 0, sizeof(cliaddr)); 
-        unsigned int len;
-        int n; 
   
-        len = sizeof(cliaddr);  //len is value/resuslt 
+    return 0;
+}
 
+void read_input_file(std::string filename){
+    std::ifstream infile(filename);
+    std::string line;
+
+    while (std::getline(infile, line)){
+        std::cout << "> " << line << std::endl;
+        if(line.rfind("add ",0) == 0){          //add
+            hosts_data.add(line);
+        }else if(line.rfind("link ",0) == 0){   //link
+            save_dns_server(line);
+        }else{                                  //linha não reconhecida
+            std::cout << "ERRO: Linha não reconhecida: '" << line << "'" << std::endl;
+        }
+    }
+}
+
+
+
+void save_dns_server(std::string cmd_line){
+
+    //verifica se a estrutura da linha está correta
+   size_t n = std::count(cmd_line.begin(), cmd_line.end(), ' ');
+    if (n != 2){
+        std::cout << "Comando incorreto, o uso deve ser:" << std::endl;
+        std::cout << "\tlink <ip> <porta>" << std::endl;
+        return;
+    }
+
+    //lê valores
+    std::istringstream iss(cmd_line); 
+    std::string ip, porta;
+    iss >> cmd_line;
+    iss >> ip;
+    iss >> porta;
+
+    struct sockaddr_storage s;
+
+    //tenta criar um endereço a partir dos dados passados
+    if (addr_parse(ip.c_str(),porta.c_str(), &s) == 0 ){    //se conseguiu criar, adiciona ao array de servidores
+        dns_servers.push_back(s);
+        std::cout << "Link salvo com sucesso." << std::endl;
+    }else{  //caso contrário, informa ao usuário endereço inválido
+        std::cout << "Não foi possível reconhecer o endereço informado como "
+                "um endereço válido. Tente novamente." << std::endl;
+    }
+}
+
+
+
+std::string request_other_servers(int serverSocket,std::string hostname){
+    //percorre cada servidor conectado
+    for(auto it = dns_servers.begin(); it != dns_servers.end(); ++it){
+        struct sockaddr_storage oserver_addr_st = (*it);
+
+        std::string s = "1" + hostname; 
+        const char * msg = s.c_str();
+
+        log_answer = 'W'; //marca que está esperando resposta
+        //envia requisição
+        sendto(serverSocket, msg, strlen(msg), 
+            MSG_CONFIRM, (const struct sockaddr *) &oserver_addr_st, 
+                sizeof(oserver_addr_st));
+        
+        
+        while (log_answer == 'W'); //aguarda chegada da resposta
+        if(answer != "-1"){ //lê variável global recém alterada
+            return answer;
+        }
+        
+    }
+    return "-1";
+}
+
+void * answer_request(void * request_data){
+    struct request_thread_data * r_data = (struct request_thread_data *) request_data;
+    
+    //verifica se possui esse hostname salvo
+    std::string resp = hosts_data.search_hostname(r_data->hostname);
+
+    if (resp == "-1"){ //não possui hostname salvo, pede aos outros servidores DNS
+        resp = request_other_servers(r_data->serverSocket, r_data->hostname);
+    }
+
+    std::string s = "2" + resp;
+    const char * msg = s.c_str();
+    //envia resposta obtida aos servidor que requereu
+    sendto(r_data->serverSocket,msg, strlen(msg), 
+        MSG_CONFIRM, (const struct sockaddr *) &r_data->cliaddr, 
+            sizeof(r_data->cliaddr)); 
+    free(r_data);
+    return request_data;
+}
+
+void * listen_to_msgs(void * serverSocket){
+    int * s_socket = (int *) serverSocket;
+
+    while(1){
+        struct sockaddr_storage cliaddr; //armazenará endereço do servidor que enviou a mensagem
+        memset(&cliaddr, 0, sizeof(cliaddr)); 
+
+        unsigned int len = sizeof(cliaddr);
         char buffer[BUFSZ];
 
-        addrtostr(addr, buffer,BUFSZ);
-        printf("%s\n",buffer);
-
-        n = -1;
-        
-        n = recvfrom(serverSocket, (char *)buffer, BUFSZ,  
+        int n = recvfrom(*s_socket, (char *)buffer, BUFSZ,  
                     MSG_WAITALL, ( struct sockaddr *) &cliaddr, 
                     &len); 
-        
-        
-        buffer[n] = '\0'; 
-        printf("Client : %s\n", buffer); 
+
+        if (n > 0) { //se recebeu mensagem corretamente
+            buffer[n] = '\0';
+            std::string s = buffer;
+            s.erase(0,1);
+            if (buffer[0] == '1' ){         //requisição
+                struct request_thread_data *r_data = (struct request_thread_data *) malloc(sizeof(*r_data));
+
+                r_data->serverSocket = *s_socket;
+                r_data->cliaddr = cliaddr;
+                r_data->hostname = s;
+                
+                //cria nova thread para responder à requisição
+                pthread_t tid;
+                pthread_create(&tid, NULL, answer_request, r_data);
+
+            }else if (buffer[0] == '2') {   //resposta
+                answer = s;         //escreve resposta na variável pública
+                log_answer = 'R';   //libera a leitura da variável
+            }
+        }
     }
-    // //prepara para receber conexões
-    // if (listen(serverSocket, 10) != 0) {
-    //     logError("Failed to listen.");
-    // }
-
-    // while (1) {
-
-    //     //recebe conexão do cliente
-    //     struct sockaddr_storage client_storage;
-    //     struct sockaddr *client_addr = (struct sockaddr *)(&client_storage);
-    //     socklen_t client_addrlen = sizeof(client_storage);
-
-    //     int client_socket = accept(serverSocket, client_addr, &client_addrlen);
-    //     if (client_socket == -1) {
-    //         logError("Failed to accept new client connection");
-    //     }
-
-    //     //envia ao cliente o tamanho da palavra
-    //     char buf[BUFSZ];
-    //     memset(buf, 0, BUFSZ);
-    //     buf[0] = 1;
-    //     buf[1] = strlen(word);
-    //     size_t count = send(client_socket, buf, 2 , 0);
-    //     if (count != 2) {
-    //         logError("send size of word");
-    //     }
-
-    //     //estrutura de dados para armazenar as letras adivinhadas
-    //     struct Forca Forca;
-    //     init_forca(&Forca);
-        
-    //     while(1){
-    //         // recebe palpite do cliente
-    //         memset(buf, 0, 2);
-    //         recv(client_socket, buf, 2, 0);
-    //         char c = buf[1];
-    //         unsigned int oc_count;
-            
-    //         //verifica se a letra está na palavra
-    //         check_char_in_word(&Forca, c, &oc_count, buf);
-            
-    //         //idetifica se cliente já adivinhou a palavra
-    //         //e envia mensagem 4 se sim
-    //         if (guessed_all(&Forca)){
-    //             buf[0] = 4;
-    //             count = send(client_socket, buf, 1, 0);
-    //             if (count != 1) {
-    //                 logError("send end of game");
-    //             }
-    //             break;
-    //         }
-
-    //         //envia a resposta ao palpite ao cliente
-    //         count = send(client_socket, buf, oc_count+2, 0);
-    //         if (count != oc_count+2) {
-    //             logError("send size of word");
-    //         }
-
-    //     }
-
-
-    //     free(Forca.guessed);
-    //     close(client_socket);
-    // }
-
-    return 0;
 }

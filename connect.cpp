@@ -9,29 +9,28 @@
 #include <sys/types.h>
 #include <arpa/inet.h>
 
-#define version 4 //set IPv4 or IPv6v
+#define version 4 //define IPv4 ou IPv6v
 
 void logError(const char *msg) {
 	perror(msg);
 	exit(EXIT_FAILURE);
 }
 
-
 int init_server_sockaddr(int iPversion, const char *portstr, struct sockaddr_storage *storage) {
-    uint16_t port = (uint16_t)atoi(portstr); // unsigned short
+    uint16_t port = (uint16_t)atoi(portstr); 
     if (port == 0) {
         return -1;
     }
     port = htons(port); // host to network short
 
     memset(storage, 0, sizeof(*storage));
-    if (iPversion == 4) {
+    if (iPversion == 4) { //IPv4
         struct sockaddr_in *addr4 = (struct sockaddr_in *)storage;
         addr4->sin_family = AF_INET;
         addr4->sin_addr.s_addr = INADDR_ANY;
         addr4->sin_port = port;
         return 0;
-    } else if (iPversion == 6) {
+    } else if (iPversion == 6) { //IPv6
         struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)storage;
         addr6->sin6_family = AF_INET6;
         addr6->sin6_addr = in6addr_any;
@@ -52,7 +51,7 @@ int init_server(char *port, struct sockaddr_storage *saddr_storage){
         logError("Failed to init server socket.\n");
     }
 
-    //allow address reuse
+    //permite reuso do socket
     int enable = 1;
     if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) != 0) {
         logError("Failed to configure socket.");
@@ -87,7 +86,6 @@ int addr_parse(const char *addrstr, const char *portstr, struct sockaddr_storage
         struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)storage;
         addr6->sin6_family = AF_INET6;
         addr6->sin6_port = port;
-        // addr6->sin6_addr = inaddr6
         memcpy(&(addr6->sin6_addr), &inaddr6, sizeof(inaddr6));
         return 0;
     }
@@ -95,9 +93,11 @@ int addr_parse(const char *addrstr, const char *portstr, struct sockaddr_storage
     return -1;
 }
 
-void addrtostr(const struct sockaddr *addr, char *str, size_t strsize) {
+void addrtostr(const struct sockaddr *addr) {
+    //int version;
     char addrstr[INET6_ADDRSTRLEN + 1] = "";
     uint16_t port;
+    char *str;
 
     if (addr->sa_family == AF_INET) {
         //version = 4;
@@ -119,6 +119,6 @@ void addrtostr(const struct sockaddr *addr, char *str, size_t strsize) {
         logError("unknown protocol family.");
     }
     if (str) {
-        snprintf(str, strsize, "IPv%d %s %hu", version, addrstr, port);
+        printf("IPv%d %s %hu", version, addrstr, port);
     }
 }

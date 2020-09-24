@@ -16,7 +16,8 @@ public:
 
     void add(std::string cmd_line);
 
-    int search(std::string cmd_line);
+    std::string search(std::string cmd_line);
+    std::string search_hostname(std::string hostname);
 
 
 };

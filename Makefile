@@ -1,5 +1,5 @@
 all:
-	g++ servidor.cpp server_connect.cpp data.cpp -o servidor
+	g++ -pthread servidor.cpp connect.cpp data.cpp -o servidor_dns
 
 clean:
-	rm servidor
+	rm servidor_dns
