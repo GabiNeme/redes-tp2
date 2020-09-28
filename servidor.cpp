@@ -47,7 +47,6 @@ int main(int argc, char **argv) {
     struct sockaddr_storage addr_storage;
     int serverSocket = init_server(argv[1], &addr_storage);
     struct sockaddr *addr = (struct sockaddr *)(&addr_storage);
-    addrtostr(addr);
 
     //adiciona ao socket o endereço local
     if (bind(serverSocket, addr, sizeof(addr_storage)) != 0) {

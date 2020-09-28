@@ -93,32 +93,3 @@ int addr_parse(const char *addrstr, const char *portstr, struct sockaddr_storage
     return -1;
 }
 
-void addrtostr(const struct sockaddr *addr) {
-    //int version;
-    char addrstr[INET6_ADDRSTRLEN + 1] = "";
-    uint16_t port;
-    char *str;
-
-    if (addr->sa_family == AF_INET) {
-        //version = 4;
-        struct sockaddr_in *addr4 = (struct sockaddr_in *)addr;
-        if (!inet_ntop(AF_INET, &(addr4->sin_addr), addrstr,
-                       INET6_ADDRSTRLEN + 1)) {
-            logError("ntop");
-        }
-        port = ntohs(addr4->sin_port); // network to host short
-    } else if (addr->sa_family == AF_INET6) {
-        //version = 6;
-        struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)addr;
-        if (!inet_ntop(AF_INET6, &(addr6->sin6_addr), addrstr,
-                       INET6_ADDRSTRLEN + 1)) {
-            logError("ntop");
-        }
-        port = ntohs(addr6->sin6_port); // network to host short
-    } else {
-        logError("unknown protocol family.");
-    }
-    if (str) {
-        printf("IPv%d %s %hu", version, addrstr, port);
-    }
-}
